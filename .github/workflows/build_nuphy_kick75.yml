@@ -8,6 +8,9 @@ on:
       - '.github/workflows/build_nuphy_kick75.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Compile nuphy/kick75/ansi:via
@@ -30,11 +33,33 @@ jobs:
       - name: Compile firmware
         run: qmk compile -kb nuphy/kick75/ansi -km via
 
-      - name: Upload firmware
+      - name: Save firmware
         uses: actions/upload-artifact@v4
         with:
-          name: nuphy_kick75_ansi_via
-          path: |
-            *.bin
-            *.hex
-            *.uf2
+          name: firmware
+          path: "*.bin"
+
+  release:
+    name: Publish firmware to Releases
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware/
+
+      - name: Publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete firmware-latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create firmware-latest firmware/*.bin \
+            --title "NuPhy Kick75 Latest Firmware" \
+            --prerelease \
+            --notes "Built from \`${{ github.sha }}\`"

@@ -169,4 +169,4 @@ typedef struct
     uint8_t retain2;
 } user_config_t;
 
-bool usb_idle_lights_are_off(void);
+bool keyboard_lights_are_off(void);

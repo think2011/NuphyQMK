@@ -28,10 +28,10 @@ extern uint16_t        no_act_time;
 
 uint8_t uart_send_cmd(uint8_t cmd, uint8_t ack_cnt, uint8_t delayms);
 
-static bool usb_idle_lights_off = false;
+static bool keyboard_lights_off = false;
 
-bool usb_idle_lights_are_off(void) {
-    return usb_idle_lights_off;
+bool keyboard_lights_are_off(void) {
+    return keyboard_lights_off;
 }
 
 static void set_led_power(bool enabled) {
@@ -40,16 +40,21 @@ static void set_led_power(bool enabled) {
     writePin(RGB_DRIVER_SDB2, enabled);
 }
 
-static void set_usb_idle_lights_off(bool lights_off) {
-    if (usb_idle_lights_off == lights_off) return;
+static void set_keyboard_lights_off(bool lights_off) {
+    if (keyboard_lights_off == lights_off) {
+        return;
+    }
 
-    usb_idle_lights_off = lights_off;
+    keyboard_lights_off = lights_off;
     if (lights_off) {
         rgb_matrix_set_suspend_state(true);
         set_led_power(false);
     } else {
         set_led_power(true);
         rgb_matrix_set_suspend_state(false);
+        if (rgb_matrix_is_enabled()) {
+            rgb_matrix_mode_noeeprom(rgb_matrix_get_mode());
+        }
     }
 }
 
@@ -62,23 +67,23 @@ void Sleep_Handle(void) {
     static uint32_t rf_disconnect_time = 0;
 
     /* 50ms interval */
-    if (timer_elapsed32(delay_step_timer) < 50) return;
+    if (timer_elapsed32(delay_step_timer) < 50) {
+        return;
+    }
     delay_step_timer = timer_read32();
 
     if (f_goto_sleep) {
         f_goto_sleep = 0;
 
-        // Full sleep takes ownership of the LED power state. Keep the RGB
-        // matrix suspended until QMK receives the USB resume event.
-        usb_idle_lights_off = false;
-
         if (user_config.sleep_enable) {
-            if (dev_info.rf_state == RF_CONNECT)
+            if (dev_info.rf_state == RF_CONNECT) {
                 uart_send_cmd(CMD_SET_CONFIG, 5, 5);
-            else
+            } else {
                 uart_send_cmd(CMD_SLEEP, 5, 5);
+            }
 
-            set_led_power(false);
+            /* Keep rendering suspended until a keyboard event restores power. */
+            set_keyboard_lights_off(true);
         }
 
         f_wakeup_prepare = 1;
@@ -87,7 +92,7 @@ void Sleep_Handle(void) {
     if (f_wakeup_prepare && (no_act_time < 10)) {
         f_wakeup_prepare = 0;
 
-        set_led_power(true);
+        set_keyboard_lights_off(false);
 
         uart_send_cmd(CMD_HAND, 0, 1);
 
@@ -108,7 +113,9 @@ void Sleep_Handle(void) {
         }
     }
 
-    if (f_goto_sleep || f_wakeup_prepare) return;
+    if (f_goto_sleep || f_wakeup_prepare) {
+        return;
+    }
 
     if (dev_info.link_mode == LINK_USB) {
         if (USB_DRIVER.state == USB_SUSPENDED) {
@@ -118,10 +125,10 @@ void Sleep_Handle(void) {
             }
         } else {
             usb_suspend_debounce = 0;
-            set_usb_idle_lights_off(user_config.sleep_enable && no_act_time >= SLEEP_TIME_DELAY);
+            set_keyboard_lights_off(user_config.sleep_enable && no_act_time >= SLEEP_TIME_DELAY);
         }
     } else {
-        set_usb_idle_lights_off(false);
+        set_keyboard_lights_off(false);
 
         if (dev_info.rf_state == RF_CONNECT) {
             rf_disconnect_time = 0;

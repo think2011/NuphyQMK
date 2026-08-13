@@ -19,14 +19,44 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hal_usb.h"
 #include "usb_main.h"
 
-extern user_config_t    user_config;
-extern DEV_INFO_STRUCT      dev_info;
-extern bool                 f_wakeup_prepare;
-extern bool                 f_goto_sleep;
-extern uint16_t             rf_linking_time;
-extern uint16_t             no_act_time;
+extern user_config_t   user_config;
+extern DEV_INFO_STRUCT dev_info;
+extern bool            f_wakeup_prepare;
+extern bool            f_goto_sleep;
+extern uint16_t        rf_linking_time;
+extern uint16_t        no_act_time;
 
 uint8_t uart_send_cmd(uint8_t cmd, uint8_t ack_cnt, uint8_t delayms);
+
+static bool keyboard_lights_off = false;
+
+bool keyboard_lights_are_off(void) {
+    return keyboard_lights_off;
+}
+
+static void set_led_power(bool enabled) {
+    writePin(DC_BOOST_PIN, enabled);
+    writePin(RGB_DRIVER_SDB1, enabled);
+    writePin(RGB_DRIVER_SDB2, enabled);
+}
+
+static void set_keyboard_lights_off(bool lights_off) {
+    if (keyboard_lights_off == lights_off) {
+        return;
+    }
+
+    keyboard_lights_off = lights_off;
+    if (lights_off) {
+        rgb_matrix_set_suspend_state(true);
+        set_led_power(false);
+    } else {
+        set_led_power(true);
+        rgb_matrix_set_suspend_state(false);
+        if (rgb_matrix_is_enabled()) {
+            rgb_matrix_mode_noeeprom(rgb_matrix_get_mode());
+        }
+    }
+}
 
 /**
  * @brief  Sleep Handle.
@@ -37,22 +67,23 @@ void Sleep_Handle(void) {
     static uint32_t rf_disconnect_time = 0;
 
     /* 50ms interval */
-    if (timer_elapsed32(delay_step_timer) < 50) return;
+    if (timer_elapsed32(delay_step_timer) < 50) {
+        return;
+    }
     delay_step_timer = timer_read32();
 
     if (f_goto_sleep) {
         f_goto_sleep = 0;
 
-        if(user_config.sleep_enable) {
-            if (dev_info.rf_state == RF_CONNECT)
+        if (user_config.sleep_enable) {
+            if (dev_info.rf_state == RF_CONNECT) {
                 uart_send_cmd(CMD_SET_CONFIG, 5, 5);
-            else
+            } else {
                 uart_send_cmd(CMD_SLEEP, 5, 5);
+            }
 
-            // power off led
-            writePinLow(DC_BOOST_PIN);
-            writePinLow(RGB_DRIVER_SDB1);
-            writePinLow(RGB_DRIVER_SDB2);
+            /* Keep rendering suspended until a keyboard event restores power. */
+            set_keyboard_lights_off(true);
         }
 
         f_wakeup_prepare = 1;
@@ -61,15 +92,13 @@ void Sleep_Handle(void) {
     if (f_wakeup_prepare && (no_act_time < 10)) {
         f_wakeup_prepare = 0;
 
-        writePinHigh(DC_BOOST_PIN);
-        writePinHigh(RGB_DRIVER_SDB1);
-        writePinHigh(RGB_DRIVER_SDB2);
+        set_keyboard_lights_off(false);
 
         uart_send_cmd(CMD_HAND, 0, 1);
 
         if (dev_info.link_mode == LINK_USB) {
-            #define USB_GETSTATUS_REMOTE_WAKEUP_ENABLED (2U)
-            if ((USB_DRIVER.status & USB_GETSTATUS_REMOTE_WAKEUP_ENABLED) ) {
+#define USB_GETSTATUS_REMOTE_WAKEUP_ENABLED (2U)
+            if ((USB_DRIVER.status & USB_GETSTATUS_REMOTE_WAKEUP_ENABLED)) {
                 usb_lld_wakeup_host(&USB_DRIVER);
                 wait_ms(50);
                 uint8_t timeout = 10;
@@ -84,7 +113,9 @@ void Sleep_Handle(void) {
         }
     }
 
-    if (f_goto_sleep || f_wakeup_prepare) return;
+    if (f_goto_sleep || f_wakeup_prepare) {
+        return;
+    }
 
     if (dev_info.link_mode == LINK_USB) {
         if (USB_DRIVER.state == USB_SUSPENDED) {
@@ -94,21 +125,25 @@ void Sleep_Handle(void) {
             }
         } else {
             usb_suspend_debounce = 0;
+            set_keyboard_lights_off(user_config.sleep_enable && no_act_time >= SLEEP_TIME_DELAY);
         }
-    } else if (dev_info.rf_state == RF_CONNECT) {
-        rf_disconnect_time = 0;
-        if (no_act_time >= SLEEP_TIME_DELAY) {
-            f_goto_sleep = 1;
-        }
-    } else if (rf_linking_time >= LINK_TIMEOUT) {
-        rf_linking_time = 0;
-        f_goto_sleep    = 1;
-    } else if (dev_info.rf_state == RF_DISCONNECT) {
-        rf_disconnect_time++;
-        if (rf_disconnect_time > 5 * 20) {
+    } else {
+        set_keyboard_lights_off(false);
+
+        if (dev_info.rf_state == RF_CONNECT) {
             rf_disconnect_time = 0;
-            f_goto_sleep = 1;
+            if (no_act_time >= SLEEP_TIME_DELAY) {
+                f_goto_sleep = 1;
+            }
+        } else if (rf_linking_time >= LINK_TIMEOUT) {
+            rf_linking_time = 0;
+            f_goto_sleep    = 1;
+        } else if (dev_info.rf_state == RF_DISCONNECT) {
+            rf_disconnect_time++;
+            if (rf_disconnect_time > 5 * 20) {
+                rf_disconnect_time = 0;
+                f_goto_sleep       = 1;
+            }
         }
     }
 }
-

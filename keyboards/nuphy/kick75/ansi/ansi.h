@@ -168,3 +168,5 @@ typedef struct
     uint8_t sleep_enable;
     uint8_t retain2;
 } user_config_t;
+
+bool keyboard_lights_are_off(void);

@@ -87,7 +87,7 @@ void suspend_power_down_kb(void)
  */
 void suspend_wakeup_init_kb(void)
 {
-    rgb_matrix_set_suspend_state(false);
+    rgb_matrix_set_suspend_state(usb_idle_lights_are_off());
 }
 
 /**
@@ -742,6 +742,12 @@ void m_side_led_show(void)
 {
     static bool flag_power_on         = 1;
     extern bool f_dial_sw_init_ok;
+
+    if (usb_idle_lights_are_off()) {
+        side_play_timer = timer_read32();
+        return;
+    }
+
     side_play_cnt += timer_elapsed32(side_play_timer);
     side_play_timer = timer_read32();
 

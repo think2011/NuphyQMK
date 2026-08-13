@@ -1,0 +1,4 @@
+# Required by this repository's legacy requirements.txt but not bundled in the
+# pinned QMK build image.
+appdirs==1.4.4 \
+    --hash=sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128
